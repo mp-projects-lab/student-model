@@ -1,4 +1,14 @@
 services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: mydatabase
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
   api-backend:
     build: ./backend
     ports:
@@ -7,6 +17,8 @@ services:
       - ./backend:/app
     environment:
       - WATCHFILES_FORCE_POLLING=true
+    depends_on:
+      - db
 
   ui-frontend:
     build: ./frontend
@@ -17,3 +29,5 @@ services:
       - /app/node_modules
     depends_on:
       - api-backend
+volumes:
+  db_data:
