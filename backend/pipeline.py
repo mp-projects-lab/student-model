@@ -1,9 +1,18 @@
-import pandas as pd
+import os
 import re
+import gc
+
+import pandas as pd
 import torch
 from transformers import pipeline
+from tqdm import tqdm
 
-FILE_PATH = "backend\\stanfordMOOCForumPostsSet.xlsx"
+FILE_PATH = "backend\\stanfordMOOCForumPostsSet.xlsx" 
+CHECKPOINT_PATH = "Processed_forum_posts.csv"
+
+# Change to None when ready to run all 28,682 rows (~12-15 mins).
+MAX_ROWS = None
+
 
 # =====================================================================
 # STAGE 1: DATA INGESTION, CLEANING & STANDARDIZATION
@@ -34,12 +43,16 @@ def run_stage_1_cleaning() -> pd.DataFrame:
     df_cleaned['word_count'] = df_cleaned['Processed_Text'].apply(lambda x: len(x.split()))
     df_cleaned = df_cleaned[df_cleaned['word_count'] >= 3].copy()
 
+    # Keep only the clean columns needed downstream
+    keep_cols = ['forum_uid', 'CourseType', 'created_at', 'word_count', 'Processed_Text']
+    df_cleaned = df_cleaned[keep_cols].reset_index(drop=True)
+
     print(f"Stage 1 Complete: {df_cleaned.shape[0]} clean posts across {df_cleaned['forum_uid'].nunique()} students.")
     return df_cleaned
 
 
 # =====================================================================
-# STAGE 2: REFINED HUGGING FACE INFERENCE (0-100% SCALE + GPU BATCHING)
+# STAGE 2: BATCH NLP INFERENCE & CHECKPOINT GENERATION
 # =====================================================================
 
 def get_optimal_device():
@@ -53,86 +66,130 @@ def get_optimal_device():
         print("Hardware selected: CPU Fallback")
         return -1
 
-def run_stage_2_sample_inference(df_cleaned: pd.DataFrame, sample_size: int = 10) -> pd.DataFrame:
-    print(f"\n--- 2.0 Initializing Refined Stage 2 Inference ({sample_size} rows) ---")
-    device = get_optimal_device()
-    df_sample = df_cleaned.head(sample_size).copy()
-    texts = df_sample['Processed_Text'].tolist()
+def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) -> pd.DataFrame:
+    # If checkpoint already exists on disk, load it directly to save GPU time
+    if os.path.exists(CHECKPOINT_PATH):
+        print(f"\n--- Found existing checkpoint '{CHECKPOINT_PATH}'! Loading from disk ---")
+        df_scored = pd.read_csv(CHECKPOINT_PATH, parse_dates=['created_at'])
+        print(f"Loaded {df_scored.shape[0]} scored posts from checkpoint.")
+        return df_scored
 
-    # 2.1 AFFECTIVE MODEL: SamLowe/roberta-base-go_emotions
-    print("Loading Affective Model (SamLowe/roberta-base-go_emotions)...")
+    df_target = df_cleaned.head(max_rows).copy() if max_rows else df_cleaned.copy()
+    total_posts = len(df_target)
+    texts = df_target['Processed_Text'].tolist()
+
+    print(f"\n--- 2.0 Starting Batch NLP Inference on {total_posts} posts ---")
+    device = get_optimal_device()
+    precision = torch.float16 if device == 0 else torch.float32
+
+    # -----------------------------------------------------------------
+    # 2.1 AFFECTIVE DIMENSION (SamLowe/roberta-base-go_emotions)
+    # -----------------------------------------------------------------
+    print("\n[1/2] Loading Affective Model (SamLowe/roberta-base-go_emotions)...")
     affective_pipe = pipeline(
-        task="text-classification",
+        "text-classification",
         model="SamLowe/roberta-base-go_emotions",
         top_k=None,
         truncation=True,
         max_length=512,
         device=device,
-        batch_size=32  # Parallel batching for RTX 3070
+        dtype=precision
     )
 
-    print("Running Affective Inference...")
-    affective_outputs = affective_pipe(texts)
-
-    distress_labels = {'confusion', 'annoyance', 'disappointment', 'nervousness', 'fear', 'sadness', 'anger'}
+    distress_set = {
+        'confusion', 'annoyance', 'disappointment', 'nervousness', 'fear',
+        'sadness', 'anger', 'embarrassment', 'disapproval', 'remorse', 'grief'
+    }
 
     primary_emotions = []
     emotion_scores_pct = []
-    distress_probs_pct = []
+    distress_pcts = []
+    aff_batch_size = 32
 
-    for post_preds in affective_outputs:
-        primary_emotions.append(post_preds[0]['label'])
-        # Normalize to 0-100% scale
-        emotion_scores_pct.append(round(post_preds[0]['score'] * 100, 2))
-        
-        # Sum struggle/distress probabilities, cap at 1.0, and convert to 0-100%
-        raw_distress = sum(item['score'] for item in post_preds if item['label'] in distress_labels)
-        distress_probs_pct.append(round(min(1.0, raw_distress) * 100, 2))
+    for i in tqdm(range(0, total_posts, aff_batch_size), desc="Affective Inference (RoBERTa)"):
+        batch_texts = texts[i : i + aff_batch_size]
+        batch_out = affective_pipe(batch_texts, batch_size=aff_batch_size)
 
-    df_sample['primary_emotion'] = primary_emotions
-    df_sample['emotion_score_pct'] = emotion_scores_pct
-    df_sample['distress_pct'] = distress_probs_pct
+        for post_preds in batch_out:
+            primary_emotions.append(post_preds[0]['label'])
+            emotion_scores_pct.append(round(post_preds[0]['score'] * 100, 2))
+            raw_distress = sum(x['score'] for x in post_preds if x['label'] in distress_set)
+            distress_pcts.append(round(min(1.0, raw_distress) * 100, 2))
 
-    # 2.2 COGNITIVE MODEL: facebook/bart-large-mnli (Refined NLI Framing)
-    print("Loading Cognitive Model (facebook/bart-large-mnli)...")
+    df_target['primary_emotion'] = primary_emotions
+    df_target['emotion_score_pct'] = emotion_scores_pct
+    df_target['distress_pct'] = distress_pcts
+
+    # Free RoBERTa from VRAM before loading DeBERTa-v3
+    del affective_pipe
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # -----------------------------------------------------------------
+    # 2.2 COGNITIVE DIMENSION (MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli)
+    # -----------------------------------------------------------------
+    print("\n[2/2] Loading Cognitive Model (MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli)...")
     cognitive_pipe = pipeline(
-        task="zero-shot-classification",
-        model="facebook/bart-large-mnli",
+        "zero-shot-classification",
+        model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
         device=device,
-        batch_size=16  # Optimal batch size for 4-label NLI on 8GB VRAM
+        dtype=precision
     )
 
-    # Map descriptive NLI verb phrases to clean UI labels
-    intent_mapping = {
-        "asking a question or seeking help with a problem": "Seeking Clarification",
-        "sharing an opinion, insight, or discussing course concepts": "Conceptual Discussion",
-        "asking about grades, deadlines, exams, or technical issues": "Course Logistics",
-        "encouraging classmates, thanking peers, or socializing": "Peer Support"
+    intent_map = {
+        "asking a question, expressing confusion, or requesting help": "Seeking Clarification",
+        "sharing a personal opinion, reflection, or explaining an idea": "Conceptual Discussion",
+        "reporting a technical issue, grading question, or course deadline": "Course Logistics",
+        "thanking classmates, offering encouragement, or greeting peers": "Peer Support"
     }
-    candidate_descriptions = list(intent_mapping.keys())
+    candidate_labels = list(intent_map.keys())
 
-    print("Running Refined Cognitive Zero-Shot Inference...")
-    cognitive_outputs = cognitive_pipe(
-        texts,
-        candidate_labels=candidate_descriptions,
-        hypothesis_template="In this course forum post, the student is {}.",
-        truncation=True
-    )
+    cognitive_intents = []
+    intent_scores_pct = []
+    cog_batch_size = 16
 
-    # Map winning description back to clean UI category and convert score to 0-100%
-    df_sample['cognitive_intent'] = [intent_mapping[out['labels'][0]] for out in cognitive_outputs]
-    df_sample['intent_score_pct'] = [round(out['scores'][0] * 100, 2) for out in cognitive_outputs]
+    for i in tqdm(range(0, total_posts, cog_batch_size), desc="Cognitive Inference (DeBERTa-v3)"):
+        batch_texts = texts[i : i + cog_batch_size]
+        batch_out = cognitive_pipe(
+            batch_texts,
+            candidate_labels=candidate_labels,
+            hypothesis_template="In this course forum post, the student is {}.",
+            truncation=True,
+            batch_size=cog_batch_size
+        )
+        # Ensure batch_out is always a list even if final batch has 1 item
+        if isinstance(batch_out, dict):
+            batch_out = [batch_out]
 
-    # 2.3 Preview Refined Output
-    print("\n--- Refined Stage 2 Multidimensional Preview (0-100% Scale) ---")
-    output_cols = [
-        'forum_uid', 'word_count', 'primary_emotion', 
-        'distress_pct', 'cognitive_intent', 'intent_score_pct'
-    ]
-    print(df_sample[output_cols].to_string(index=False))
-    return df_sample
+        for out in batch_out:
+            cognitive_intents.append(intent_map[out['labels'][0]])
+            intent_scores_pct.append(round(out['scores'][0] * 100, 2))
+
+    df_target['cognitive_intent'] = cognitive_intents
+    df_target['intent_score_pct'] = intent_scores_pct
+
+    # Free DeBERTa-v3 from VRAM
+    del cognitive_pipe
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # -----------------------------------------------------------------
+    # 2.3 SAVE CHECKPOINT & SUMMARY STATS
+    # -----------------------------------------------------------------
+    df_target.to_csv(CHECKPOINT_PATH, index=False)
+    print(f"\nCheckpoint successfully saved to '{CHECKPOINT_PATH}' ({len(df_target)} rows)!")
+
+    print("\n--- Affective & Cognitive Summary Breakdown ---")
+    print("\nTop 5 Detected Emotions:")
+    print(df_target['primary_emotion'].value_counts().head(5))
+    print("\nCognitive Intent Distribution:")
+    print(df_target['cognitive_intent'].value_counts())
+
+    return df_target
 
 
 if __name__ == "__main__":
     df_clean = run_stage_1_cleaning()
-    df_scored_sample = run_stage_2_sample_inference(df_clean, sample_size=10)
+    df_scored = run_stage_2_batch_inference(df_clean, max_rows=MAX_ROWS)
