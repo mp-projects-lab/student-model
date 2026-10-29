@@ -1,14 +1,21 @@
 import os
 import re
 import gc
+import json
+import warnings
+
+# Silence Windows Hugging Face symlink and token warnings
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import pandas as pd
 import torch
 from transformers import pipeline
 from tqdm import tqdm
 
-FILE_PATH = "backend\\stanfordMOOCForumPostsSet.xlsx" 
+FILE_PATH = "backend\\stanfordMOOCForumPostsSet.xlsx" if os.path.exists("backend\\stanfordMOOCForumPostsSet.xlsx") else "stanfordMOOCForumPostsSet.xlsx"
 CHECKPOINT_PATH = "Processed_forum_posts.csv"
+PROFILES_JSON_PATH = "student_profiles.json"
 
 # Change to None when ready to run all 28,682 rows (~12-15 mins).
 MAX_ROWS = None
@@ -137,11 +144,12 @@ def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) 
         dtype=precision
     )
 
+    # Garrison's Community of Inquiry (CoI) Cognitive Presence Taxonomy
     intent_map = {
-        "asking a question, expressing confusion, or requesting help": "Seeking Clarification",
-        "sharing a personal opinion, reflection, or explaining an idea": "Conceptual Discussion",
-        "reporting a technical issue, grading question, or course deadline": "Course Logistics",
-        "thanking classmates, offering encouragement, or greeting peers": "Peer Support"
+        "reporting a technical issue, course deadline, or greeting and thanking peers": "Course Logistics & Social",
+        "asking a question, expressing confusion, or requesting help with a problem": "Triggering (Questioning)",
+        "sharing a personal opinion, reflection, or brainstorming ideas about the topic": "Exploration (Discussion)",
+        "explaining a solution, connecting concepts with evidence, or teaching a peer": "Integration (Synthesis)"
     }
     candidate_labels = list(intent_map.keys())
 
@@ -190,6 +198,162 @@ def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) 
     return df_target
 
 
+# =====================================================================
+# STAGE 3: MULTIDIMENSIONAL STUDENT AGGREGATION (BEHAVIORAL + NLP)
+# =====================================================================
+
+def run_stage_3_student_aggregation(df_scored: pd.DataFrame) -> list:
+    print("\n--- 3.0 Running Stage 3: Multidimensional Student Aggregation ---")
+    df = df_scored.copy()
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df['post_date'] = df['created_at'].dt.date
+
+    # Map both our initial labels and the CoI labels to Cognitive Depth Weights (0-100)
+    cognitive_weights = {
+        # CoI Taxonomy Labels
+        "Course Logistics & Social": 30.0,
+        "Triggering (Questioning)": 45.0,
+        "Exploration (Discussion)": 75.0,
+        "Integration (Synthesis)": 100.0,
+        # Backwards-compatible mapping for existing CSV checkpoint
+        "Course Logistics": 30.0,
+        "Peer Support": 40.0,
+        "Seeking Clarification": 45.0,
+        "Conceptual Discussion": 85.0
+    }
+    df['cognitive_depth_weight'] = df['cognitive_intent'].map(cognitive_weights).fillna(50.0)
+
+    # Sort chronologically for accurate time-series timelines
+    df = df.sort_values(by=['forum_uid', 'created_at'])
+
+    # 3.1 Group by student (Entity Matching)
+    grouped = df.groupby('forum_uid').agg(
+        course_type=('CourseType', 'first'),
+        last_updated=('created_at', 'max'),
+        first_post=('created_at', 'min'),
+        # Behavioral raw metrics
+        total_posts=('Processed_Text', 'count'),
+        avg_word_count=('word_count', 'mean'),
+        total_words=('word_count', 'sum'),
+        unique_active_days=('post_date', 'nunique'),
+        # Affective aggregated metrics
+        avg_distress_pct=('distress_pct', 'mean'),
+        max_distress_pct=('distress_pct', 'max'),
+        primary_emotion=('primary_emotion', lambda s: s.mode().iloc[0] if not s.mode().empty else "neutral"),
+        # Cognitive aggregated metrics
+        primary_intent=('cognitive_intent', lambda s: s.mode().iloc[0] if not s.mode().empty else "Exploration (Discussion)"),
+        avg_intent_confidence_pct=('intent_score_pct', 'mean'),
+        cognitive_mastery_pct=('cognitive_depth_weight', 'mean')
+    ).reset_index()
+
+    grouped['active_span_days'] = (grouped['last_updated'] - grouped['first_post']).dt.days
+
+    # 3.2 Compute Cohort-Normalized Behavioral Engagement Score (0-100%)
+    p_posts = grouped.groupby('course_type')['total_posts'].rank(pct=True)
+    p_words = grouped.groupby('course_type')['avg_word_count'].rank(pct=True)
+    p_days = grouped.groupby('course_type')['unique_active_days'].rank(pct=True)
+
+    grouped['behavioral_score_pct'] = (
+        (0.45 * p_posts) + (0.35 * p_words) + (0.20 * p_days)
+    ) * 100
+
+    # Pre-group posts by student for fast O(N) timeline construction across 28,682 rows
+    posts_by_student = {
+        uid: group.to_dict('records')
+        for uid, group in df.groupby('forum_uid', sort=False)
+    }
+
+    # 3.3 Build JSON Payload with Nested Dimensions + Time-Series Timeline
+    student_profiles = []
+    for row in grouped.to_dict('records'):
+        uid = row['forum_uid']
+        student_posts = posts_by_student.get(uid, [])
+
+        timeline = [
+            {
+                "created_at": post['created_at'].isoformat(),
+                "word_count": int(post['word_count']),
+                "primary_emotion": post['primary_emotion'],
+                "distress_pct": round(float(post['distress_pct']), 2),
+                "cognitive_intent": post['cognitive_intent'],
+                "intent_score_pct": round(float(post['intent_score_pct']), 2),
+                "text_preview": str(post['Processed_Text'])[:140] + ("..." if len(str(post['Processed_Text'])) > 140 else "")
+            }
+            for post in student_posts
+        ]
+
+        avg_distress = round(float(row['avg_distress_pct']), 2)
+        beh_score = round(float(row['behavioral_score_pct']), 2)
+        cog_score = round(float(row['cognitive_mastery_pct']), 2)
+
+        profile = {
+            "student_id": uid,
+            "course_type": row['course_type'],
+            "last_updated": row['last_updated'].isoformat(),
+            "high_distress_flag": bool(avg_distress >= 30.0),
+            # Ready-to-plot 0-100% axes for Mario's Recharts RadarChart
+            "radar_chart_data": [
+                {"dimension": "Behavioral Engagement", "score": beh_score, "fullMark": 100},
+                {"dimension": "Cognitive Depth", "score": cog_score, "fullMark": 100},
+                {"dimension": "Affective Stability", "score": round(100.0 - avg_distress, 2), "fullMark": 100},
+                {"dimension": "Distress Risk", "score": avg_distress, "fullMark": 100}
+            ],
+            "dimensions": {
+                "behavioral": {
+                    "engagement_score_pct": beh_score,
+                    "total_posts": int(row['total_posts']),
+                    "avg_word_count": round(float(row['avg_word_count']), 1),
+                    "total_words": int(row['total_words']),
+                    "unique_active_days": int(row['unique_active_days']),
+                    "active_span_days": int(row['active_span_days'])
+                },
+                "affective": {
+                    "avg_distress_pct": avg_distress,
+                    "max_distress_pct": round(float(row['max_distress_pct']), 2),
+                    "affective_stability_pct": round(100.0 - avg_distress, 2),
+                    "primary_emotion": row['primary_emotion'],
+                    "high_distress_flag": bool(avg_distress >= 30.0)
+                },
+                "cognitive": {
+                    "cognitive_mastery_pct": cog_score,
+                    "primary_intent": row['primary_intent'],
+                    "avg_intent_confidence_pct": round(float(row['avg_intent_confidence_pct']), 2)
+                }
+            },
+            "timeline": timeline
+        }
+        student_profiles.append(profile)
+
+    # Sort students so multi-post active students appear first in Mario's table
+    student_profiles.sort(
+        key=lambda x: (
+            x['dimensions']['behavioral']['total_posts'],
+            x['dimensions']['affective']['avg_distress_pct']
+        ),
+        reverse=True
+    )
+
+    with open(PROFILES_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(student_profiles, f, indent=2)
+
+    print(f"Stage 3 Complete! Generated {len(student_profiles)} student profiles -> '{PROFILES_JSON_PATH}'")
+    print("\n--- Top 3 Most Active Student Profiles Preview ---")
+    for s in student_profiles[:3]:
+        print(
+            f"ID: {s['student_id'][:10]}... | Course: {s['course_type']} | "
+            f"Posts: {s['dimensions']['behavioral']['total_posts']} | "
+            f"Behavioral: {s['dimensions']['behavioral']['engagement_score_pct']}% | "
+            f"Distress: {s['dimensions']['affective']['avg_distress_pct']}% | "
+            f"Cognitive Mastery: {s['dimensions']['cognitive']['cognitive_mastery_pct']}% "
+            f"({s['dimensions']['cognitive']['primary_intent']})"
+        )
+    return student_profiles
+
+
 if __name__ == "__main__":
-    df_clean = run_stage_1_cleaning()
-    df_scored = run_stage_2_batch_inference(df_clean, max_rows=MAX_ROWS)
+    if os.path.exists(CHECKPOINT_PATH):
+        df_scored = run_stage_2_batch_inference(pd.DataFrame(), max_rows=MAX_ROWS)
+    else:
+        df_clean = run_stage_1_cleaning()
+        df_scored = run_stage_2_batch_inference(df_clean, max_rows=MAX_ROWS)
+    run_stage_3_student_aggregation(df_scored)
