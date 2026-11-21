@@ -27,21 +27,27 @@
 
 @layer base {
   body {
+    @apply antialiased text-pretty;
     background-color: var(--color-surface);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
 
   ::selection {
     background-color: var(--color-ink);
     color: var(--color-surface);
   }
-  
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-mono);
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-sans);
     letter-spacing: -0.03em;
+    color: var(--color-ink);
+    font-weight: bold;
   }
 }
 
