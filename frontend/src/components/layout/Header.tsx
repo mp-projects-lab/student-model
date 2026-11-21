@@ -1,3 +1,5 @@
+import { Info } from 'lucide-react'
+
 function Header() {
   return (
     <header className="sticky top-0 z-10 border-b border-line py-4 bg-surface">
@@ -12,8 +14,9 @@ function Header() {
         <div>
           <button
             id="more-info"
-            className="flex items-center gap-2 text-xs p-2 border border-line shadow-xs cursor-pointer rounded-md hover:border-ink transition-colors duration-300 ease-linear"
+            className="flex items-center gap-1 text-ink text-xs p-2 border border-line shadow-xs cursor-pointer rounded-md hover:border-ink transition-colors duration-300 ease-linear"
           >
+            <Info size={14} strokeWidth={1.8} />
             ¿Cómo leer el panel?
           </button>
         </div>
