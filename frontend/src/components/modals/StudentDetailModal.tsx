@@ -302,26 +302,27 @@ export function StudentDetailModal({
                       className="my-1"
                     />
 
-                    <div className="w-full grid grid-cols-2 gap-1.5 text-[11px] pt-2 border-t border-line">
+                    <div className="w-full grid grid-cols-2 gap-2 pt-3 border-t border-line">
                       {student.radar_chart_data.map((metric, index) => {
                         const avgScore = courseAvgRadar[index]?.score
                         return (
                           <div
                             key={metric.dimension}
-                            className="flex items-center justify-between px-1.5 py-0.5 gap-1"
+                            className="rounded-lg border border-line/70 px-2.5 py-1.5 flex flex-col gap-0.5"
                           >
-                            <span className="text-muted truncate">
-                              {getRadarDimensionLabel(metric.dimension)}:
+                            <span className="text-[11px] text-muted leading-tight">
+                              {getRadarDimensionLabel(metric.dimension)}
                             </span>
-                            <span className="font-mono-num font-semibold text-ink shrink-0">
-                              {metric.score.toFixed(1)}%
+                            <div className="flex items-baseline gap-1.5 font-mono-num whitespace-nowrap">
+                              <span className="text-xs font-semibold text-ink">
+                                {metric.score.toFixed(1)}%
+                              </span>
                               {avgScore !== undefined && (
-                                <span className="text-[10px] font-normal text-muted">
-                                  {' '}
-                                  (vs {avgScore.toFixed(0)}%)
+                                <span className="text-[10px] text-muted">
+                                  vs {avgScore.toFixed(0)}%
                                 </span>
                               )}
-                            </span>
+                            </div>
                           </div>
                         )
                       })}
