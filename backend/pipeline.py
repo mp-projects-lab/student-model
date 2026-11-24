@@ -20,6 +20,15 @@ PROFILES_JSON_PATH = "student_profiles.json"
 # Change to None when ready to run all 28,682 rows (~12-15 mins).
 MAX_ROWS = None
 
+# Garrison's Community of Inquiry (CoI) Cognitive Presence Taxonomy
+COI_INTENT_MAP = {
+    "reporting a technical issue, course deadline, or greeting and thanking peers": "Course Logistics & Social",
+    "asking a question, expressing confusion, or requesting help with a problem": "Triggering (Questioning)",
+    "sharing a personal opinion, reflection, or brainstorming ideas about the topic": "Exploration (Discussion)",
+    "explaining a solution, connecting concepts with evidence, or teaching a peer": "Integration (Synthesis)"
+}
+COI_LABELS = set(COI_INTENT_MAP.values())
+
 
 # =====================================================================
 # STAGE 1: DATA INGESTION, CLEANING & STANDARDIZATION
@@ -74,16 +83,29 @@ def get_optimal_device():
         return -1
 
 def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) -> pd.DataFrame:
-    # If checkpoint already exists on disk, load it directly to save GPU time
-    if os.path.exists(CHECKPOINT_PATH):
-        print(f"\n--- Found existing checkpoint '{CHECKPOINT_PATH}'! Loading from disk ---")
-        df_scored = pd.read_csv(CHECKPOINT_PATH, parse_dates=['created_at'])
-        print(f"Loaded {df_scored.shape[0]} scored posts from checkpoint.")
-        return df_scored
+    reuse_affective = False
 
-    df_target = df_cleaned.head(max_rows).copy() if max_rows else df_cleaned.copy()
+    if os.path.exists(CHECKPOINT_PATH):
+        df_existing = pd.read_csv(CHECKPOINT_PATH, parse_dates=['created_at'])
+        existing_intents = set(df_existing['cognitive_intent'].dropna().unique()) if 'cognitive_intent' in df_existing.columns else set()
+
+        # If checkpoint already has the new CoI Cognitive Taxonomy labels, return immediately
+        if existing_intents and existing_intents.issubset(COI_LABELS):
+            print(f"\n--- Found up-to-date CoI checkpoint '{CHECKPOINT_PATH}'! Loading from disk ---")
+            print(f"Loaded {df_existing.shape[0]} scored posts from checkpoint.")
+            return df_existing
+        else:
+            print(
+                f"\n--- Found checkpoint '{CHECKPOINT_PATH}' with legacy cognitive labels {existing_intents}. "
+                "Reusing Affective scores and re-running DeBERTa-v3 for CoI Cognitive Taxonomy ---"
+            )
+            df_target = df_existing.head(max_rows).copy() if max_rows else df_existing.copy()
+            reuse_affective = {'primary_emotion', 'emotion_score_pct', 'distress_pct'}.issubset(df_target.columns)
+    else:
+        df_target = df_cleaned.head(max_rows).copy() if max_rows else df_cleaned.copy()
+
     total_posts = len(df_target)
-    texts = df_target['Processed_Text'].tolist()
+    texts = df_target['Processed_Text'].astype(str).tolist()
 
     print(f"\n--- 2.0 Starting Batch NLP Inference on {total_posts} posts ---")
     device = get_optimal_device()
@@ -92,46 +114,49 @@ def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) 
     # -----------------------------------------------------------------
     # 2.1 AFFECTIVE DIMENSION (SamLowe/roberta-base-go_emotions)
     # -----------------------------------------------------------------
-    print("\n[1/2] Loading Affective Model (SamLowe/roberta-base-go_emotions)...")
-    affective_pipe = pipeline(
-        "text-classification",
-        model="SamLowe/roberta-base-go_emotions",
-        top_k=None,
-        truncation=True,
-        max_length=512,
-        device=device,
-        dtype=precision
-    )
+    if not reuse_affective:
+        print("\n[1/2] Loading Affective Model (SamLowe/roberta-base-go_emotions)...")
+        affective_pipe = pipeline(
+            "text-classification",
+            model="SamLowe/roberta-base-go_emotions",
+            top_k=None,
+            truncation=True,
+            max_length=512,
+            device=device,
+            dtype=precision
+        )
 
-    distress_set = {
-        'confusion', 'annoyance', 'disappointment', 'nervousness', 'fear',
-        'sadness', 'anger', 'embarrassment', 'disapproval', 'remorse', 'grief'
-    }
+        distress_set = {
+            'confusion', 'annoyance', 'disappointment', 'nervousness', 'fear',
+            'sadness', 'anger', 'embarrassment', 'disapproval', 'remorse', 'grief'
+        }
 
-    primary_emotions = []
-    emotion_scores_pct = []
-    distress_pcts = []
-    aff_batch_size = 32
+        primary_emotions = []
+        emotion_scores_pct = []
+        distress_pcts = []
+        aff_batch_size = 32
 
-    for i in tqdm(range(0, total_posts, aff_batch_size), desc="Affective Inference (RoBERTa)"):
-        batch_texts = texts[i : i + aff_batch_size]
-        batch_out = affective_pipe(batch_texts, batch_size=aff_batch_size)
+        for i in tqdm(range(0, total_posts, aff_batch_size), desc="Affective Inference (RoBERTa)"):
+            batch_texts = texts[i : i + aff_batch_size]
+            batch_out = affective_pipe(batch_texts, batch_size=aff_batch_size)
 
-        for post_preds in batch_out:
-            primary_emotions.append(post_preds[0]['label'])
-            emotion_scores_pct.append(round(post_preds[0]['score'] * 100, 2))
-            raw_distress = sum(x['score'] for x in post_preds if x['label'] in distress_set)
-            distress_pcts.append(round(min(1.0, raw_distress) * 100, 2))
+            for post_preds in batch_out:
+                primary_emotions.append(post_preds[0]['label'])
+                emotion_scores_pct.append(round(post_preds[0]['score'] * 100, 2))
+                raw_distress = sum(x['score'] for x in post_preds if x['label'] in distress_set)
+                distress_pcts.append(round(min(1.0, raw_distress) * 100, 2))
 
-    df_target['primary_emotion'] = primary_emotions
-    df_target['emotion_score_pct'] = emotion_scores_pct
-    df_target['distress_pct'] = distress_pcts
+        df_target['primary_emotion'] = primary_emotions
+        df_target['emotion_score_pct'] = emotion_scores_pct
+        df_target['distress_pct'] = distress_pcts
 
-    # Free RoBERTa from VRAM before loading DeBERTa-v3
-    del affective_pipe
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        # Free RoBERTa from VRAM before loading DeBERTa-v3
+        del affective_pipe
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    else:
+        print("\n[1/2] Reusing existing RoBERTa Affective scores from checkpoint (skipping redundant GPU pass)...")
 
     # -----------------------------------------------------------------
     # 2.2 COGNITIVE DIMENSION (MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli)
@@ -144,14 +169,7 @@ def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) 
         dtype=precision
     )
 
-    # Garrison's Community of Inquiry (CoI) Cognitive Presence Taxonomy
-    intent_map = {
-        "reporting a technical issue, course deadline, or greeting and thanking peers": "Course Logistics & Social",
-        "asking a question, expressing confusion, or requesting help with a problem": "Triggering (Questioning)",
-        "sharing a personal opinion, reflection, or brainstorming ideas about the topic": "Exploration (Discussion)",
-        "explaining a solution, connecting concepts with evidence, or teaching a peer": "Integration (Synthesis)"
-    }
-    candidate_labels = list(intent_map.keys())
+    candidate_labels = list(COI_INTENT_MAP.keys())
 
     cognitive_intents = []
     intent_scores_pct = []
@@ -171,7 +189,7 @@ def run_stage_2_batch_inference(df_cleaned: pd.DataFrame, max_rows: int = None) 
             batch_out = [batch_out]
 
         for out in batch_out:
-            cognitive_intents.append(intent_map[out['labels'][0]])
+            cognitive_intents.append(COI_INTENT_MAP[out['labels'][0]])
             intent_scores_pct.append(round(out['scores'][0] * 100, 2))
 
     df_target['cognitive_intent'] = cognitive_intents
@@ -215,7 +233,7 @@ def run_stage_3_student_aggregation(df_scored: pd.DataFrame) -> list:
         "Triggering (Questioning)": 45.0,
         "Exploration (Discussion)": 75.0,
         "Integration (Synthesis)": 100.0,
-        # Backwards-compatible mapping for existing CSV checkpoint
+        # Backwards-compatible mapping for legacy CSV checkpoint
         "Course Logistics": 30.0,
         "Peer Support": 40.0,
         "Seeking Clarification": 45.0,
@@ -335,6 +353,12 @@ def run_stage_3_student_aggregation(df_scored: pd.DataFrame) -> list:
 
     with open(PROFILES_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(student_profiles, f, indent=2)
+
+    backend_profiles_path = os.path.join("backend", "student_profiles.json")
+    if os.path.isdir("backend") and os.path.abspath(PROFILES_JSON_PATH) != os.path.abspath(backend_profiles_path):
+        with open(backend_profiles_path, "w", encoding="utf-8") as f:
+            json.dump(student_profiles, f, indent=2)
+        print(f"Also synced student profiles -> '{backend_profiles_path}'")
 
     print(f"Stage 3 Complete! Generated {len(student_profiles)} student profiles -> '{PROFILES_JSON_PATH}'")
     print("\n--- Top 3 Most Active Student Profiles Preview ---")

@@ -50,25 +50,58 @@ def profile_to_dict(s: StudentProfile, include_timeline: bool = True) -> dict:
     return data
 
 
+COI_LABELS = {
+    "Course Logistics & Social",
+    "Triggering (Questioning)",
+    "Exploration (Discussion)",
+    "Integration (Synthesis)",
+}
+
+
 def seed_database():
     # 1. Crea la tabla student_profiles en PostgreSQL si no existe
     Base.metadata.create_all(bind=engine)
 
-    # 2. Verifica si ya hay registros cargados
+    # 2. Verifica si ya hay registros cargados y si tienen la taxonomía CoI actualizada
     db = SessionLocal()
     try:
+        path = get_profiles_path()
         existing_count = db.query(func.count(StudentProfile.student_id)).scalar() or 0
         if existing_count > 0:
-            print(f"Base de datos ya contiene {existing_count} perfiles. Omitiendo volcado.", flush=True)
-            return
+            sample = db.query(StudentProfile).first()
+            db_intent = (
+                sample.dimensions.get("cognitive", {}).get("primary_intent")
+                if sample and isinstance(sample.dimensions, dict)
+                else None
+            )
+            if db_intent in COI_LABELS:
+                print(f"Base de datos ya contiene {existing_count} perfiles actualizados (CoI). Omitiendo volcado.", flush=True)
+                return
 
-        path = get_profiles_path()
-        if not os.path.exists(path):
-            print(f"No se encontró {path} para el volcado inicial.", flush=True)
-            return
-
-        with open(path, "r", encoding="utf-8") as f:
-            raw_profiles = json.load(f)
+            # Check if the JSON file on disk has been upgraded to CoI labels
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    raw_profiles = json.load(f)
+                json_intent = (
+                    raw_profiles[0].get("dimensions", {}).get("cognitive", {}).get("primary_intent")
+                    if raw_profiles
+                    else None
+                )
+                if json_intent in COI_LABELS:
+                    print("Detectada actualización a taxonomía CoI en student_profiles.json. Actualizando PostgreSQL...", flush=True)
+                    db.query(StudentProfile).delete()
+                    db.commit()
+                else:
+                    print(f"Base de datos ya contiene {existing_count} perfiles. Omitiendo volcado.", flush=True)
+                    return
+            else:
+                return
+        else:
+            if not os.path.exists(path):
+                print(f"No se encontró {path} para el volcado inicial.", flush=True)
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                raw_profiles = json.load(f)
 
         objects = [
             StudentProfile(
