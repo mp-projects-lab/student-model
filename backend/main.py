@@ -5,15 +5,17 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, defer
-from sqlalchemy import func
+from sqlalchemy import Float, and_, cast, func
 
 from database import engine, SessionLocal, Base, get_db
 from models import StudentProfile
 from schemas import (
     CourseType,
+    DistressStatus,
     SortField,
     SortOrder,
     DashboardSummaryResponse,
+    CourseAnalyticsResponse,
     PaginatedStudentsResponse,
     StudentDetailResponse,
 )
@@ -200,10 +202,201 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
     }
 
 
+AVG_DISTRESS_EXPR = cast(
+    StudentProfile.dimensions["affective"]["avg_distress_pct"].astext, Float
+)
+ENGAGEMENT_EXPR = cast(
+    StudentProfile.dimensions["behavioral"]["engagement_score_pct"].astext, Float
+)
+COGNITIVE_EXPR = cast(
+    StudentProfile.dimensions["cognitive"]["cognitive_mastery_pct"].astext, Float
+)
+STABILITY_EXPR = cast(
+    StudentProfile.dimensions["affective"]["affective_stability_pct"].astext, Float
+)
+PRIMARY_EMOTION_EXPR = StudentProfile.dimensions["affective"]["primary_emotion"].astext
+PRIMARY_INTENT_EXPR = StudentProfile.dimensions["cognitive"]["primary_intent"].astext
+
+
+def _build_radar_metrics(
+    engagement: float, cognitive: float, stability: float, distress: float
+) -> list[dict]:
+    return [
+        {"dimension": "Behavioral Engagement", "score": round(engagement, 1), "fullMark": 100},
+        {"dimension": "Cognitive Depth", "score": round(cognitive, 1), "fullMark": 100},
+        {"dimension": "Affective Stability", "score": round(stability, 1), "fullMark": 100},
+        {"dimension": "Distress Risk", "score": round(distress, 1), "fullMark": 100},
+    ]
+
+
+@app.get("/api/analytics", response_model=CourseAnalyticsResponse)
+def get_course_analytics(
+    course_type: Optional[CourseType] = Query(
+        None, description="Optional filter by Education, Medicine, or Humanities"
+    ),
+    db: Session = Depends(get_db),
+):
+    """Returns per-course or global aggregates for the 4 dashboard cards directly from PostgreSQL."""
+    course_rows = (
+        db.query(
+            StudentProfile.course_type.label("course_type"),
+            func.count(StudentProfile.student_id).label("total_students"),
+            func.coalesce(func.sum(StudentProfile.total_posts), 0).label("total_posts"),
+            func.count(StudentProfile.student_id)
+            .filter(AVG_DISTRESS_EXPR >= 30.0)
+            .label("risk"),
+            func.count(StudentProfile.student_id)
+            .filter(and_(AVG_DISTRESS_EXPR >= 15.0, AVG_DISTRESS_EXPR < 30.0))
+            .label("caution"),
+            func.count(StudentProfile.student_id)
+            .filter(AVG_DISTRESS_EXPR < 15.0)
+            .label("safe"),
+            func.coalesce(func.sum(ENGAGEMENT_EXPR), 0.0).label("sum_engagement"),
+            func.coalesce(func.sum(COGNITIVE_EXPR), 0.0).label("sum_cognitive"),
+            func.coalesce(func.sum(STABILITY_EXPR), 0.0).label("sum_stability"),
+            func.coalesce(func.sum(AVG_DISTRESS_EXPR), 0.0).label("sum_distress"),
+        )
+        .group_by(StudentProfile.course_type)
+        .all()
+    )
+
+    if not course_rows:
+        empty_radar = _build_radar_metrics(0.0, 0.0, 0.0, 0.0)
+        return {
+            "course_type": course_type,
+            "total_students": 0,
+            "total_posts": 0,
+            "status_breakdown": {
+                "risk": 0,
+                "risk_pct": 0.0,
+                "caution": 0,
+                "caution_pct": 0.0,
+                "safe": 0,
+                "safe_pct": 0.0,
+            },
+            "radar_avg": empty_radar,
+            "top_emotions": [],
+            "intents": [],
+            "course_radars": {"ALL": empty_radar},
+        }
+
+    course_radars: dict[str, list[dict]] = {}
+    all_students = 0
+    all_eng = 0.0
+    all_cog = 0.0
+    all_stab = 0.0
+    all_dist = 0.0
+
+    for row in course_rows:
+        cnt = row.total_students or 0
+        all_students += cnt
+        all_eng += float(row.sum_engagement or 0.0)
+        all_cog += float(row.sum_cognitive or 0.0)
+        all_stab += float(row.sum_stability or 0.0)
+        all_dist += float(row.sum_distress or 0.0)
+        if cnt > 0:
+            course_radars[row.course_type] = _build_radar_metrics(
+                float(row.sum_engagement) / cnt,
+                float(row.sum_cognitive) / cnt,
+                float(row.sum_stability) / cnt,
+                float(row.sum_distress) / cnt,
+            )
+
+    course_radars["ALL"] = (
+        _build_radar_metrics(
+            all_eng / all_students,
+            all_cog / all_students,
+            all_stab / all_students,
+            all_dist / all_students,
+        )
+        if all_students > 0
+        else _build_radar_metrics(0.0, 0.0, 0.0, 0.0)
+    )
+
+    target_rows = (
+        [r for r in course_rows if r.course_type == course_type]
+        if course_type
+        else course_rows
+    )
+
+    total_students = sum(r.total_students for r in target_rows)
+    total_posts = sum(int(r.total_posts or 0) for r in target_rows)
+    risk = sum(r.risk for r in target_rows)
+    caution = sum(r.caution for r in target_rows)
+    safe = sum(r.safe for r in target_rows)
+
+    def _pct(part: int, whole: int) -> float:
+        return round((part / whole) * 100, 1) if whole > 0 else 0.0
+
+    selected_radar = course_radars.get(
+        course_type if course_type else "ALL",
+        _build_radar_metrics(0.0, 0.0, 0.0, 0.0),
+    )
+
+    emotion_query = db.query(
+        PRIMARY_EMOTION_EXPR.label("emotion"),
+        func.count(StudentProfile.student_id).label("count"),
+    )
+    intent_query = db.query(
+        PRIMARY_INTENT_EXPR.label("intent"),
+        func.count(StudentProfile.student_id).label("count"),
+    )
+    if course_type:
+        emotion_query = emotion_query.filter(StudentProfile.course_type == course_type)
+        intent_query = intent_query.filter(StudentProfile.course_type == course_type)
+
+    emotion_rows = (
+        emotion_query.group_by(PRIMARY_EMOTION_EXPR)
+        .order_by(func.count(StudentProfile.student_id).desc())
+        .limit(5)
+        .all()
+    )
+    intent_rows = (
+        intent_query.group_by(PRIMARY_INTENT_EXPR)
+        .order_by(func.count(StudentProfile.student_id).desc())
+        .all()
+    )
+
+    return {
+        "course_type": course_type,
+        "total_students": total_students,
+        "total_posts": total_posts,
+        "status_breakdown": {
+            "risk": risk,
+            "risk_pct": _pct(risk, total_students),
+            "caution": caution,
+            "caution_pct": _pct(caution, total_students),
+            "safe": safe,
+            "safe_pct": _pct(safe, total_students),
+        },
+        "radar_avg": selected_radar,
+        "top_emotions": [
+            {
+                "emotion": row.emotion,
+                "count": row.count,
+                "pct": _pct(row.count, total_students),
+            }
+            for row in emotion_rows
+            if row.emotion
+        ],
+        "intents": [
+            {
+                "intent": row.intent,
+                "count": row.count,
+                "pct": _pct(row.count, total_students),
+            }
+            for row in intent_rows
+            if row.intent
+        ],
+        "course_radars": course_radars,
+    }
+
+
 SORT_COLUMNS = {
     "total_posts": StudentProfile.total_posts,
     "last_updated": StudentProfile.last_updated,
     "student_id": StudentProfile.student_id,
+    "avg_distress": AVG_DISTRESS_EXPR,
 }
 
 
@@ -214,6 +407,8 @@ SORT_COLUMNS = {
 )
 def list_students(
     course_type: Optional[CourseType] = Query(None, description="Filter by Education, Medicine, or Humanities"),
+    status: Optional[DistressStatus] = Query(None, description="Filter by risk (>=30%), caution (15%-29.9%), or safe (<15%)"),
+    intent: Optional[str] = Query(None, min_length=1, description="Filter by cognitive primary_intent"),
     high_distress_only: bool = Query(False, description="Filter only at-risk students"),
     min_posts: int = Query(1, ge=0, description="Minimum posts (set to 2+ for richer timelines)"),
     search: Optional[str] = Query(None, min_length=1, description="Search student by student_id (partial or exact)"),
@@ -230,8 +425,18 @@ def list_students(
     if course_type:
         query = query.filter(StudentProfile.course_type == course_type)
 
-    if high_distress_only:
+    if status == "risk":
+        query = query.filter(AVG_DISTRESS_EXPR >= 30.0)
+    elif status == "caution":
+        query = query.filter(and_(AVG_DISTRESS_EXPR >= 15.0, AVG_DISTRESS_EXPR < 30.0))
+    elif status == "safe":
+        query = query.filter(AVG_DISTRESS_EXPR < 15.0)
+    elif high_distress_only:
         query = query.filter(StudentProfile.high_distress_flag.is_(True))
+
+    cleaned_intent = intent.strip() if intent else ""
+    if cleaned_intent:
+        query = query.filter(PRIMARY_INTENT_EXPR == cleaned_intent)
 
     cleaned_search = search.strip() if search else ""
     if cleaned_search:

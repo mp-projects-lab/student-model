@@ -2,7 +2,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 CourseType = Literal["Education", "Medicine", "Humanities"]
-SortField = Literal["total_posts", "last_updated", "student_id"]
+DistressStatus = Literal["risk", "caution", "safe"]
+SortField = Literal["total_posts", "last_updated", "student_id", "avg_distress"]
 SortOrder = Literal["asc", "desc"]
 
 
@@ -77,3 +78,35 @@ class DashboardSummaryResponse(BaseModel):
     high_distress_count: int
     high_distress_rate_pct: float
     courses_breakdown: dict[str, int]
+
+
+class StatusBreakdown(BaseModel):
+    risk: int
+    risk_pct: float
+    caution: int
+    caution_pct: float
+    safe: int
+    safe_pct: float
+
+
+class EmotionStat(BaseModel):
+    emotion: str
+    count: int
+    pct: float
+
+
+class IntentStat(BaseModel):
+    intent: str
+    count: int
+    pct: float
+
+
+class CourseAnalyticsResponse(BaseModel):
+    course_type: Optional[CourseType] = None
+    total_students: int
+    total_posts: int
+    status_breakdown: StatusBreakdown
+    radar_avg: list[RadarMetric]
+    top_emotions: list[EmotionStat]
+    intents: list[IntentStat]
+    course_radars: dict[str, list[RadarMetric]]
