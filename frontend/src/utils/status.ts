@@ -22,8 +22,8 @@ const STATUS_MAP: Record<DistressStatus, StatusInfo> = {
   },
   caution: {
     key: 'caution',
-    label: 'En observación',
-    sublabel: 'Seguimiento',
+    label: 'Atención',
+    sublabel: 'Seguimiento preventivo',
     hex: '#B7861F',
     badgeClass: 'bg-caution-soft text-caution border border-caution-border',
     dotClass: 'bg-caution',

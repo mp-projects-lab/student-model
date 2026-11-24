@@ -69,7 +69,7 @@ export function StudentsFilterBar({
           >
             <option value="">Todos los estados</option>
             <option value="risk">Prioritario (≥ 30%)</option>
-            <option value="caution">En observación (15% – 29%)</option>
+            <option value="caution">Atención (15% – 29%)</option>
             <option value="safe">Estable (&lt; 15%)</option>
           </select>
         </label>

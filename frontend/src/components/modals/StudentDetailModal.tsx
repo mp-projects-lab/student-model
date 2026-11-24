@@ -490,7 +490,7 @@ export function StudentDetailModal({
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-caution" />
-                    <span>En observación (15–29%)</span>
+                    <span>Atención (15–29%)</span>
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-safe" />
@@ -591,7 +591,7 @@ export function StudentDetailModal({
                   >
                     <option value="">Todos los mensajes</option>
                     <option value="risk">Prioritario (≥ 30%)</option>
-                    <option value="caution">En observación (15% – 29%)</option>
+                    <option value="caution">Atención (15% – 29%)</option>
                     <option value="safe">Estable (&lt; 15%)</option>
                   </select>
                 </label>

@@ -38,7 +38,7 @@ export function StatusOverviewCard({
     },
     {
       key: 'caution',
-      label: 'En observación (15–29%)',
+      label: 'Atención (15–29%)',
       count: breakdown.caution,
       pct: breakdown.caution_pct,
       textClass: 'text-caution',
@@ -80,7 +80,7 @@ export function StatusOverviewCard({
           <div
             className="h-full bg-caution transition-all duration-300"
             style={{ width: `${breakdown.caution_pct}%` }}
-            title={`En observación: ${breakdown.caution_pct}%`}
+            title={`Atención: ${breakdown.caution_pct}%`}
           />
           <div
             className="h-full bg-safe transition-all duration-300"
@@ -90,7 +90,7 @@ export function StatusOverviewCard({
         </div>
       </div>
 
-      <div className="space-y-1.5 text-xs">
+      <div className="space-y-1 text-[11px]">
         {rows.map((row) => {
           const isSelected = activeStatus === row.key
           return (
@@ -99,21 +99,23 @@ export function StatusOverviewCard({
               type="button"
               aria-pressed={isSelected}
               onClick={() => onToggleStatus(row.key)}
-              className={`w-full flex items-center justify-between px-2 py-1 rounded-md transition cursor-pointer ${
+              className={`w-full flex items-center justify-between gap-2 px-1.5 py-1.5 rounded-md text-left transition cursor-pointer ${
                 isSelected
                   ? 'bg-filter-hover ring-1 ring-ink/20'
                   : 'hover:bg-filter-hover'
               }`}
             >
               <span
-                className={`inline-flex items-center gap-2 font-semibold ${row.textClass}`}
+                className={`inline-flex items-center gap-1.5 font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
               >
                 <span
-                  className={`w-2.5 h-2.5 rounded-full shrink-0 ${row.dotClass}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${row.dotClass}`}
                 />
                 {row.label}
               </span>
-              <span className={`font-mono-num font-semibold ${row.textClass}`}>
+              <span
+                className={`font-mono-num font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
+              >
                 {formatNumber(row.count)} ({row.pct}%)
               </span>
             </button>
