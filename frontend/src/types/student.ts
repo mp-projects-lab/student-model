@@ -1,5 +1,8 @@
 export type CourseType = 'Education' | 'Medicine' | 'Humanities'
-export type SortField = 'total_posts' | 'last_updated' | 'student_id'
+export type CourseFilter = 'ALL' | CourseType
+export type DistressStatus = 'risk' | 'caution' | 'safe'
+export type StatusFilter = '' | DistressStatus
+export type SortField = 'total_posts' | 'last_updated' | 'student_id' | 'avg_distress'
 export type SortOrder = 'asc' | 'desc'
 
 export interface RadarMetric {
@@ -73,4 +76,50 @@ export interface DashboardSummaryResponse {
   high_distress_count: number
   high_distress_rate_pct: number
   courses_breakdown: Record<string, number>
+}
+
+export interface StatusBreakdown {
+  risk: number
+  risk_pct: number
+  caution: number
+  caution_pct: number
+  safe: number
+  safe_pct: number
+}
+
+export interface EmotionStat {
+  emotion: string
+  count: number
+  pct: number
+}
+
+export interface IntentStat {
+  intent: string
+  count: number
+  pct: number
+}
+
+export interface CourseAnalyticsResponse {
+  course_type: CourseType | null
+  total_students: number
+  total_posts: number
+  status_breakdown: StatusBreakdown
+  radar_avg: RadarMetric[]
+  top_emotions: EmotionStat[]
+  intents: IntentStat[]
+  course_radars: Record<string, RadarMetric[]>
+}
+
+export interface StudentsQueryParams {
+  course_type?: CourseType
+  status?: DistressStatus
+  intent?: string
+  high_distress_only?: boolean
+  min_posts?: number
+  search?: string
+  sort_by?: SortField
+  sort_order?: SortOrder
+  limit?: number
+  offset?: number
+  include_timeline?: boolean
 }
