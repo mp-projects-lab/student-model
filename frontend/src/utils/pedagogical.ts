@@ -106,16 +106,16 @@ export function getIntentTeacherDescription(intent: string): string {
   switch (intent) {
     case 'Triggering (Questioning)':
     case 'Seeking Clarification':
-      return 'Principalmente hace preguntas y plantea dudas'
+      return 'Suele hacer preguntas y plantear dudas'
     case 'Exploration (Discussion)':
     case 'Conceptual Discussion':
-      return 'Comparte reflexiones y debate ideas del tema'
+      return 'Suele debatir y compartir ideas'
     case 'Integration (Synthesis)':
-      return 'Conecta conceptos, propone soluciones y explica'
+      return 'Suele explicar y conectar ideas'
     case 'Course Logistics & Social':
     case 'Course Logistics':
     case 'Peer Support':
-      return 'Consulta aspectos prácticos del curso o interactúa socialmente'
+      return 'Consultas prácticas o saludos'
     default:
       return getIntentLabel(intent)
   }

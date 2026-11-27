@@ -91,7 +91,7 @@ export function ForumPostCard({
       </div>
 
       <p
-        className={`text-xs text-ink leading-relaxed ${
+        className={`text-xs text-ink leading-relaxed whitespace-pre-wrap break-words ${
           variant === 'card' ? 'pt-1.5 border-t border-line' : ''
         }`}
       >
