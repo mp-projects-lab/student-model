@@ -1,3 +1,4 @@
+import { MousePointerClick } from 'lucide-react'
 import type {
   DistressStatus,
   StatusBreakdown,
@@ -55,22 +56,22 @@ export function StatusOverviewCard({
   ]
 
   return (
-    <div className="border border-line rounded-xl bg-surface p-4 flex flex-col justify-between min-h-[235px]">
+    <div className="border border-line rounded-xl bg-surface p-4 flex flex-col justify-between gap-3 min-h-[255px]">
+      {/* Encabezado */}
       <div>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-ink">
-            Estado de los estudiantes
-          </h3>
-          <span className="font-mono-num text-xs text-muted shrink-0">
-            {formatNumber(totalStudents)} alumnos
+        <h3 className="text-sm font-bold text-ink leading-snug">
+          Estado de los estudiantes
+        </h3>
+        <div className="mt-0.5 flex items-baseline gap-1.5">
+          <span className="font-mono-num text-xs font-semibold text-ink">
+            {formatNumber(totalStudents)}
           </span>
+          <span className="text-[11px] text-muted">alumnos en total</span>
         </div>
-        <p className="text-[11px] text-muted mt-0.5">
-          Haz clic en un estado para filtrar la tabla
-        </p>
       </div>
 
-      <div className="my-3">
+      {/* Distribución */}
+      <div className="space-y-3 my-auto">
         <div className="w-full h-2.5 rounded-full overflow-hidden flex bg-line">
           <div
             className="h-full bg-risk transition-all duration-300"
@@ -88,39 +89,45 @@ export function StatusOverviewCard({
             title={`Estable: ${breakdown.safe_pct}%`}
           />
         </div>
-      </div>
 
-      <div className="space-y-1 text-[11px]">
-        {rows.map((row) => {
-          const isSelected = activeStatus === row.key
-          return (
-            <button
-              key={row.key}
-              type="button"
-              aria-pressed={isSelected}
-              onClick={() => onToggleStatus(row.key)}
-              className={`w-full flex items-center justify-between gap-2 px-1.5 py-1.5 rounded-md text-left transition cursor-pointer ${
-                isSelected
-                  ? 'bg-filter-hover ring-1 ring-ink/20'
-                  : 'hover:bg-filter-hover'
-              }`}
-            >
-              <span
-                className={`inline-flex items-center gap-1.5 font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
+        <div className="space-y-1 text-[11px]">
+          {rows.map((row) => {
+            const isSelected = activeStatus === row.key
+            return (
+              <button
+                key={row.key}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => onToggleStatus(row.key)}
+                className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-left transition cursor-pointer ${
+                  isSelected
+                    ? 'bg-filter-hover ring-1 ring-ink/20'
+                    : 'hover:bg-filter-hover'
+                }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${row.dotClass}`}
-                />
-                {row.label}
-              </span>
-              <span
-                className={`font-mono-num font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
-              >
-                {formatNumber(row.count)} ({row.pct}%)
-              </span>
-            </button>
-          )
-        })}
+                  className={`inline-flex items-center gap-1.5 font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${row.dotClass}`}
+                  />
+                  {row.label}
+                </span>
+                <span
+                  className={`font-mono-num font-semibold whitespace-nowrap shrink-0 ${row.textClass}`}
+                >
+                  {formatNumber(row.count)} ({row.pct}%)
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Pie informativo */}
+      <div className="pt-2.5 border-t border-line/70 flex items-center gap-1.5 text-[11px] text-muted">
+        <MousePointerClick size={12} strokeWidth={2} className="shrink-0" />
+        <span className="truncate">Haz clic en un estado para filtrar</span>
       </div>
     </div>
   )

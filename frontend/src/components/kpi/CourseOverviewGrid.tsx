@@ -36,7 +36,7 @@ export function CourseOverviewGrid({
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className="border border-line rounded-xl bg-surface p-4 min-h-[235px] flex flex-col justify-between animate-pulse"
+            className="border border-line rounded-xl bg-surface p-4 min-h-[255px] flex flex-col justify-between animate-pulse"
           >
             <div className="space-y-2">
               <div className="h-4 w-3/5 rounded bg-line" />

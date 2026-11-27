@@ -10,20 +10,17 @@ export function EmotionsCard({ emotions }: EmotionsCardProps) {
   const maxPct = Math.max(...emotions.map((item) => item.pct), 1)
 
   return (
-    <div className="border border-line rounded-xl bg-surface p-4 flex flex-col justify-between min-h-[235px]">
+    <div className="border border-line rounded-xl bg-surface p-4 flex flex-col justify-between gap-3 min-h-[255px]">
+      {/* Encabezado */}
       <div>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-ink">
-            Emociones predominantes
-          </h3>
-          <span className="text-[11px] text-muted shrink-0">Afectiva</span>
-        </div>
-        <p className="text-[11px] text-muted mt-0.5">
-          Emoción principal por estudiante en el foro
-        </p>
+        <h3 className="text-sm font-bold text-ink leading-snug">
+          Emociones predominantes
+        </h3>
+        <div className="mt-0.5 text-[11px] text-muted">Dimensión afectiva</div>
       </div>
 
-      <div className="space-y-2 my-auto pt-2 text-xs">
+      {/* Barras */}
+      <div className="space-y-2.5 my-auto text-xs">
         {emotions.length === 0 ? (
           <p className="text-muted text-center py-6">Sin datos disponibles</p>
         ) : (
@@ -36,7 +33,9 @@ export function EmotionsCard({ emotions }: EmotionsCardProps) {
                 className="grid grid-cols-12 items-center gap-2"
                 title={`${label}: ${formatNumber(item.count)} estudiantes (${item.pct}%)`}
               >
-                <span className="col-span-4 truncate text-ink">{label}</span>
+                <span className="col-span-4 truncate text-ink font-medium">
+                  {label}
+                </span>
                 <div className="col-span-5 h-1.5 rounded-full bg-line overflow-hidden">
                   <div
                     className="h-full bg-ink rounded-full transition-all duration-300"
@@ -50,6 +49,11 @@ export function EmotionsCard({ emotions }: EmotionsCardProps) {
             )
           })
         )}
+      </div>
+
+      {/* Pie informativo */}
+      <div className="pt-2.5 border-t border-line/70 text-[11px] text-muted truncate">
+        Emoción principal por estudiante
       </div>
     </div>
   )
