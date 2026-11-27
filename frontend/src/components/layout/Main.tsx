@@ -20,6 +20,7 @@ function Main() {
   const [course, setCourse] = useState<CourseFilter>('ALL')
   const [status, setStatus] = useState<StatusFilter>('')
   const [intent, setIntent] = useState('')
+  const [minPosts, setMinPosts] = useState(1)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null)
@@ -44,6 +45,7 @@ function Main() {
     course,
     status,
     intent,
+    minPosts,
     search: debouncedSearch,
     page,
     pageSize: PAGE_SIZE,
@@ -80,6 +82,11 @@ function Main() {
     setPage(1)
   }
 
+  const handleMinPostsChange = (nextMinPosts: number) => {
+    setMinPosts(nextMinPosts)
+    setPage(1)
+  }
+
   const handleSearchChange = (value: string) => {
     setSearch(value)
     setPage(1)
@@ -89,6 +96,7 @@ function Main() {
     setSearch('')
     setStatus('')
     setIntent('')
+    setMinPosts(1)
     setPage(1)
   }
 
@@ -134,15 +142,18 @@ function Main() {
           search={search}
           status={status}
           intent={intent}
+          minPosts={minPosts}
           availableIntents={availableIntents}
           onSearchChange={handleSearchChange}
           onStatusChange={handleStatusChange}
           onIntentChange={handleIntentChange}
+          onMinPostsChange={handleMinPostsChange}
           onResetFilters={handleResetFilters}
         />
 
         <StudentsTable
           students={students}
+          courseRadars={analytics?.course_radars ?? {}}
           isLoading={isStudentsLoading}
           error={studentsError}
           onSelectStudent={setActiveStudentId}

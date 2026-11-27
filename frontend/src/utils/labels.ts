@@ -38,10 +38,10 @@ export const EMOTION_LABELS: Record<string, string> = {
 
 export const INTENT_LABELS: Record<string, string> = {
   // Taxonomía Community of Inquiry (CoI) actual en BD
-  'Triggering (Questioning)': 'Indagación (Preguntas)',
-  'Exploration (Discussion)': 'Exploración (Debate)',
-  'Integration (Synthesis)': 'Integración (Síntesis)',
-  'Course Logistics & Social': 'Logística y social',
+  'Triggering (Questioning)': 'Preguntas y dudas',
+  'Exploration (Discussion)': 'Debate y reflexión',
+  'Integration (Synthesis)': 'Explicación y síntesis',
+  'Course Logistics & Social': 'Logística y avisos',
   // Etiquetas heredadas (compatibilidad)
   'Conceptual Discussion': 'Debate conceptual',
   'Seeking Clarification': 'Búsqueda de aclaración',

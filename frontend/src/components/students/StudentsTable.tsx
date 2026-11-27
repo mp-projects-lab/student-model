@@ -1,6 +1,5 @@
 import { AlertCircle, FileText, RefreshCw } from 'lucide-react'
-import type { StudentListItem } from '../../types/student'
-import { formatShortDate, truncateStudentId } from '../../utils/formatters'
+import type { RadarMetric, StudentListItem } from '../../types/student'
 import {
   getCourseLabel,
   getEmotionLabel,
@@ -11,14 +10,23 @@ import { StatusBadge } from './StatusBadge'
 
 interface StudentsTableProps {
   students: StudentListItem[]
+  courseRadars: Record<string, RadarMetric[]>
   isLoading: boolean
   error: string | null
   onSelectStudent: (studentId: string) => void
   onRetry: () => void
 }
 
+function getCourseAvgByDimension(
+  radar: RadarMetric[],
+  dimension: string,
+): number | undefined {
+  return radar.find((metric) => metric.dimension === dimension)?.score
+}
+
 export function StudentsTable({
   students,
+  courseRadars,
   isLoading,
   error,
   onSelectStudent,
@@ -31,17 +39,37 @@ export function StudentsTable({
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-line text-[11px] uppercase tracking-wider text-muted">
-            <th className="py-3.5 px-5 font-medium">ID Estudiante</th>
-            <th className="py-3.5 px-4 font-medium">Curso</th>
-            <th className="py-3.5 px-4 font-medium">Estado del alumno</th>
-            <th className="py-3.5 px-4 font-medium">Malestar (Prom / Máx)</th>
-            <th className="py-3.5 px-4 font-medium">Emoción</th>
-            <th className="py-3.5 px-4 font-medium">
-              Participación (Conductual)
+            <th className="py-3.5 px-4 font-medium whitespace-nowrap">
+              ID Estudiante
             </th>
-            <th className="py-3.5 px-4 font-medium">Enfoque (Cognitiva)</th>
-            <th className="py-3.5 px-4 font-medium">Última actividad</th>
-            <th className="py-3.5 px-5 font-medium text-right">Detalle</th>
+            <th className="py-3.5 px-3 font-medium whitespace-nowrap">Curso</th>
+            <th className="py-3.5 px-3 font-medium whitespace-nowrap">
+              Prioridad
+            </th>
+            <th
+              className="py-3.5 px-3 font-medium whitespace-nowrap"
+              title="Porcentaje del alumno / promedio de su grupo"
+            >
+              Malestar
+            </th>
+            <th className="py-3.5 px-3 font-medium whitespace-nowrap">
+              Emoción
+            </th>
+            <th
+              className="py-3.5 px-3 font-medium whitespace-nowrap"
+              title="Porcentaje del alumno / promedio de su grupo"
+            >
+              Participación
+            </th>
+            <th
+              className="py-3.5 px-3 font-medium whitespace-nowrap"
+              title="Porcentaje del alumno / promedio de su grupo"
+            >
+              Enfoque
+            </th>
+            <th className="py-3.5 px-4 font-medium text-right whitespace-nowrap">
+              Detalle
+            </th>
           </tr>
         </thead>
 
@@ -53,7 +81,7 @@ export function StudentsTable({
           {showSkeleton &&
             Array.from({ length: 5 }).map((_, index) => (
               <tr key={index} className="animate-pulse">
-                {Array.from({ length: 9 }).map((__, colIndex) => (
+                {Array.from({ length: 8 }).map((__, colIndex) => (
                   <td key={colIndex} className="py-4 px-4">
                     <div className="h-3.5 rounded bg-line/80 w-20" />
                   </td>
@@ -63,7 +91,7 @@ export function StudentsTable({
 
           {!showSkeleton && error && students.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-16 px-5 text-center">
+              <td colSpan={8} className="py-16 px-5 text-center">
                 <div className="inline-flex flex-col items-center gap-3 text-xs">
                   <div className="inline-flex items-center gap-2 text-risk font-medium">
                     <AlertCircle size={16} />
@@ -84,7 +112,7 @@ export function StudentsTable({
 
           {!showSkeleton && !error && students.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-16 text-center text-xs text-muted">
+              <td colSpan={8} className="py-16 text-center text-xs text-muted">
                 No se encontraron estudiantes con los filtros seleccionados.
               </td>
             </tr>
@@ -94,6 +122,21 @@ export function StudentsTable({
             students.map((student) => {
               const { behavioral, affective, cognitive } = student.dimensions
               const statusInfo = getStatusInfo(affective.avg_distress_pct)
+              const courseAvgRadar =
+                courseRadars[student.course_type] ?? courseRadars.ALL ?? []
+
+              const avgDistress = getCourseAvgByDimension(
+                courseAvgRadar,
+                'Distress Risk',
+              )
+              const avgEngagement = getCourseAvgByDimension(
+                courseAvgRadar,
+                'Behavioral Engagement',
+              )
+              const avgCognitive = getCourseAvgByDimension(
+                courseAvgRadar,
+                'Cognitive Depth',
+              )
 
               return (
                 <tr
@@ -102,53 +145,75 @@ export function StudentsTable({
                   className="hover:bg-row-hover transition cursor-pointer"
                 >
                   <td
-                    className="py-4 px-5 font-mono-num font-semibold text-ink"
+                    className="py-4 px-4 font-mono-num text-[11px] font-semibold text-ink whitespace-nowrap"
                     title={student.student_id}
                   >
-                    {truncateStudentId(student.student_id)}
+                    {student.student_id}
                   </td>
-                  <td className="py-4 px-4 text-ink">
+                  <td className="py-4 px-3 text-ink whitespace-nowrap">
                     {getCourseLabel(student.course_type)}
                   </td>
-                  <td className="py-4 px-4">
+                  <td className="py-4 px-3 whitespace-nowrap">
                     <StatusBadge distressPct={affective.avg_distress_pct} />
                   </td>
-                  <td className="py-4 px-4 font-mono-num">
+                  <td
+                    className="py-4 px-3 font-mono-num whitespace-nowrap"
+                    title={
+                      avgDistress !== undefined
+                        ? `Alumno: ${affective.avg_distress_pct.toFixed(1)}% · Promedio del grupo: ${avgDistress.toFixed(0)}%`
+                        : `Malestar del alumno: ${affective.avg_distress_pct.toFixed(1)}%`
+                    }
+                  >
                     <span className={`font-bold ${statusInfo.textClass}`}>
                       {affective.avg_distress_pct.toFixed(1)}%
                     </span>
-                    <span className="text-muted">
-                      {' '}
-                      / {affective.max_distress_pct.toFixed(0)}%
-                    </span>
+                    {avgDistress !== undefined && (
+                      <span className="text-muted">
+                        {' '}
+                        / {avgDistress.toFixed(0)}%
+                      </span>
+                    )}
                   </td>
-                  <td className="py-4 px-4 text-ink">
+                  <td className="py-4 px-3 text-ink whitespace-nowrap">
                     {getEmotionLabel(affective.primary_emotion)}
                   </td>
-                  <td className="py-4 px-4">
-                    <div className="font-mono-num font-semibold text-ink">
+                  <td
+                    className="py-4 px-3 font-mono-num whitespace-nowrap"
+                    title={
+                      avgEngagement !== undefined
+                        ? `Alumno: ${behavioral.engagement_score_pct.toFixed(1)}% (${behavioral.total_posts} mensajes · ${behavioral.unique_active_days} días) · Promedio del grupo: ${avgEngagement.toFixed(0)}%`
+                        : `${behavioral.total_posts} mensajes · ${behavioral.unique_active_days} días activos`
+                    }
+                  >
+                    <span className="font-semibold text-ink">
                       {behavioral.engagement_score_pct.toFixed(1)}%
-                    </div>
-                    <div className="text-[11px] text-muted font-mono-num">
-                      {behavioral.total_posts} msjs ·{' '}
-                      {behavioral.unique_active_days}d activos
-                    </div>
+                    </span>
+                    {avgEngagement !== undefined && (
+                      <span className="text-muted">
+                        {' '}
+                        / {avgEngagement.toFixed(0)}%
+                      </span>
+                    )}
                   </td>
-                  <td className="py-4 px-4">
-                    <div className="font-mono-num font-semibold text-ink">
+                  <td
+                    className="py-4 px-3 font-mono-num whitespace-nowrap"
+                    title={
+                      avgCognitive !== undefined
+                        ? `Alumno: ${cognitive.cognitive_mastery_pct.toFixed(1)}% (${getIntentLabel(cognitive.primary_intent)}) · Promedio del grupo: ${avgCognitive.toFixed(0)}%`
+                        : getIntentLabel(cognitive.primary_intent)
+                    }
+                  >
+                    <span className="font-semibold text-ink">
                       {cognitive.cognitive_mastery_pct.toFixed(1)}%
-                    </div>
-                    <div
-                      className="text-[11px] text-muted truncate max-w-[160px]"
-                      title={getIntentLabel(cognitive.primary_intent)}
-                    >
-                      {getIntentLabel(cognitive.primary_intent)}
-                    </div>
+                    </span>
+                    {avgCognitive !== undefined && (
+                      <span className="text-muted">
+                        {' '}
+                        / {avgCognitive.toFixed(0)}%
+                      </span>
+                    )}
                   </td>
-                  <td className="py-4 px-4 font-mono-num text-muted whitespace-nowrap">
-                    {formatShortDate(student.last_updated)}
-                  </td>
-                  <td className="py-4 px-5 text-right">
+                  <td className="py-4 px-4 text-right whitespace-nowrap">
                     <button
                       type="button"
                       onClick={(event) => {
@@ -157,7 +222,11 @@ export function StudentsTable({
                       }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface text-xs font-semibold text-ink hover:border-ink transition cursor-pointer"
                     >
-                      <FileText size={14} strokeWidth={2} className="text-muted" />
+                      <FileText
+                        size={14}
+                        strokeWidth={2}
+                        className="text-muted"
+                      />
                       <span>Expediente</span>
                     </button>
                   </td>

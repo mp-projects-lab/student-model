@@ -6,10 +6,12 @@ interface StudentsFilterBarProps {
   search: string
   status: StatusFilter
   intent: string
+  minPosts: number
   availableIntents: string[]
   onSearchChange: (value: string) => void
   onStatusChange: (value: StatusFilter) => void
   onIntentChange: (value: string) => void
+  onMinPostsChange: (value: number) => void
   onResetFilters: () => void
 }
 
@@ -17,19 +19,23 @@ export function StudentsFilterBar({
   search,
   status,
   intent,
+  minPosts,
   availableIntents,
   onSearchChange,
   onStatusChange,
   onIntentChange,
+  onMinPostsChange,
   onResetFilters,
 }: StudentsFilterBarProps) {
   const intentOptions =
     availableIntents.length > 0 ? availableIntents : DEFAULT_INTENT_OPTIONS
-  const hasActiveFilters = Boolean(search.trim() || status || intent)
+  const hasActiveFilters = Boolean(
+    search.trim() || status || intent || minPosts > 1,
+  )
 
   return (
-    <div className="px-5 py-3.5 border-b border-line flex flex-col md:flex-row md:items-center justify-between gap-3">
-      <div className="relative w-full md:w-64">
+    <div className="px-5 py-3.5 border-b border-line flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="relative w-full lg:w-56 shrink-0">
         <Search
           size={14}
           strokeWidth={2}
@@ -56,40 +62,51 @@ export function StudentsFilterBar({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 md:gap-5 text-xs">
-        <label className="flex items-center gap-2 text-muted">
-          <span>Filtrar por:</span>
-          <select
-            id="status-select"
-            value={status}
-            onChange={(event) =>
-              onStatusChange(event.target.value as StatusFilter)
-            }
-            className="px-3 py-1.5 rounded-md border border-line bg-surface text-xs text-ink font-medium focus:outline-none focus:border-ink cursor-pointer min-w-[175px]"
-          >
-            <option value="">Todos los estados</option>
-            <option value="risk">Prioritario (≥ 30%)</option>
-            <option value="caution">Atención (15% – 29%)</option>
-            <option value="safe">Estable (&lt; 15%)</option>
-          </select>
-        </label>
+      <div className="flex flex-wrap items-center gap-2.5 text-xs">
+        <span className="text-muted select-none">Filtrar por:</span>
 
-        <label className="flex items-center gap-2 text-muted">
-          <span>Filtrar por:</span>
-          <select
-            id="intent-select"
-            value={intent}
-            onChange={(event) => onIntentChange(event.target.value)}
-            className="px-3 py-1.5 rounded-md border border-line bg-surface text-xs text-ink font-medium focus:outline-none focus:border-ink cursor-pointer min-w-[195px]"
-          >
-            <option value="">Todos los enfoques</option>
-            {intentOptions.map((option) => (
-              <option key={option} value={option}>
-                {getIntentLabel(option)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <select
+          id="status-select"
+          aria-label="Filtrar por prioridad"
+          value={status}
+          onChange={(event) =>
+            onStatusChange(event.target.value as StatusFilter)
+          }
+          className="px-3 py-1.5 rounded-md border border-line bg-surface text-xs text-ink font-medium focus:outline-none focus:border-ink cursor-pointer min-w-[160px]"
+        >
+          <option value="">Todos los estados</option>
+          <option value="risk">Prioritario</option>
+          <option value="caution">Atención</option>
+          <option value="safe">Estable</option>
+        </select>
+
+        <select
+          id="intent-select"
+          aria-label="Filtrar por enfoque"
+          value={intent}
+          onChange={(event) => onIntentChange(event.target.value)}
+          className="px-3 py-1.5 rounded-md border border-line bg-surface text-xs text-ink font-medium focus:outline-none focus:border-ink cursor-pointer min-w-[175px]"
+        >
+          <option value="">Todos los enfoques</option>
+          {intentOptions.map((option) => (
+            <option key={option} value={option}>
+              {getIntentLabel(option)}
+            </option>
+          ))}
+        </select>
+
+        <select
+          id="min-posts-select"
+          aria-label="Filtrar por cantidad de mensajes"
+          value={minPosts}
+          onChange={(event) => onMinPostsChange(Number(event.target.value))}
+          className="px-3 py-1.5 rounded-md border border-line bg-surface text-xs text-ink font-medium focus:outline-none focus:border-ink cursor-pointer min-w-[175px]"
+        >
+          <option value={1}>Todos los mensajes</option>
+          <option value={2}>2+ mensajes</option>
+          <option value={5}>5+ mensajes</option>
+          <option value={10}>10+ mensajes</option>
+        </select>
 
         {hasActiveFilters && (
           <button

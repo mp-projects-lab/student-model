@@ -12,6 +12,7 @@ export interface UseStudentsOptions {
   course: CourseFilter
   status: StatusFilter
   intent: string
+  minPosts?: number
   search: string
   page: number
   pageSize: number
@@ -29,6 +30,7 @@ export function useStudents({
   course,
   status,
   intent,
+  minPosts = 1,
   search,
   page,
   pageSize,
@@ -43,6 +45,7 @@ export function useStudents({
     course,
     status,
     intent,
+    minPosts,
     trimmedSearch,
     page,
     pageSize,
@@ -65,6 +68,7 @@ export function useStudents({
         course_type: course === 'ALL' ? undefined : course,
         status: status || undefined,
         intent: intent || undefined,
+        min_posts: minPosts > 1 ? minPosts : undefined,
         search: trimmedSearch || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
@@ -99,6 +103,7 @@ export function useStudents({
     course,
     status,
     intent,
+    minPosts,
     trimmedSearch,
     pageSize,
     offset,
