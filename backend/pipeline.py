@@ -295,7 +295,7 @@ def run_stage_3_student_aggregation(df_scored: pd.DataFrame) -> list:
                 "distress_pct": round(float(post['distress_pct']), 2),
                 "cognitive_intent": post['cognitive_intent'],
                 "intent_score_pct": round(float(post['intent_score_pct']), 2),
-                "text_preview": str(post['Processed_Text'])[:140] + ("..." if len(str(post['Processed_Text'])) > 140 else "")
+                "text_preview": str(post['Processed_Text'])
             }
             for post in student_posts
         ]

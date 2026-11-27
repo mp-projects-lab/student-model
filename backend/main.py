@@ -76,11 +76,23 @@ def seed_database():
                 if sample and isinstance(sample.dimensions, dict)
                 else None
             )
-            if db_intent in COI_LABELS:
-                print(f"Base de datos ya contiene {existing_count} perfiles actualizados (CoI). Omitiendo volcado.", flush=True)
+            # Check if DB still stores legacy 140-char truncated previews
+            db_has_truncated = False
+            for row in db.query(StudentProfile.timeline).limit(25).all():
+                if any(
+                    isinstance(post, dict)
+                    and len(str(post.get("text_preview", ""))) == 143
+                    and str(post.get("text_preview", "")).endswith("...")
+                    for post in (row[0] or [])
+                ):
+                    db_has_truncated = True
+                    break
+
+            if db_intent in COI_LABELS and not db_has_truncated:
+                print(f"Base de datos ya contiene {existing_count} perfiles actualizados (CoI y textos completos). Omitiendo volcado.", flush=True)
                 return
 
-            # Check if the JSON file on disk has been upgraded to CoI labels
+            # Check if the JSON file on disk has upgraded CoI labels or full texts
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     raw_profiles = json.load(f)
@@ -89,8 +101,13 @@ def seed_database():
                     if raw_profiles
                     else None
                 )
-                if json_intent in COI_LABELS:
-                    print("Detectada actualización a taxonomía CoI en student_profiles.json. Actualizando PostgreSQL...", flush=True)
+                json_has_full_texts = any(
+                    len(str(post.get("text_preview", ""))) > 143
+                    for p in raw_profiles[:25]
+                    for post in p.get("timeline", [])
+                )
+                if json_intent in COI_LABELS and (db_intent not in COI_LABELS or (db_has_truncated and json_has_full_texts)):
+                    print("Detectada actualización en student_profiles.json (CoI / textos completos). Actualizando PostgreSQL...", flush=True)
                     db.query(StudentProfile).delete()
                     db.commit()
                 else:
